@@ -26,7 +26,7 @@ def init_connection():
 supabase: Client = init_connection()
 
 # ==========================================
-# SECURE DATABASE LOGIN GATE
+# SECURE DATABASE LOGIN & REGISTRATION GATE
 # ==========================================
 def check_password():
     if st.session_state.get("password_correct", False):
@@ -36,21 +36,48 @@ def check_password():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submit_button = st.form_submit_button("Secure Login", use_container_width=True)
+        # Create Tabs for Login and Sign Up
+        tab_login, tab_register = st.tabs(["🔐 Login", "📝 Create Account"])
+        
+        with tab_login:
+            with st.form("login_form"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submit_button = st.form_submit_button("Secure Login", use_container_width=True)
 
-            if submit_button:
-                try:
-                    response = supabase.table("users").select("*").eq("username", username).eq("password", password).execute()
-                    if len(response.data) > 0:
-                        st.session_state["password_correct"] = True
-                        st.rerun()
-                    else:
-                        st.error("🚨 Authentication failed. Invalid username or password.")
-                except Exception as e:
-                    st.error(f"Database connection error: {e}")
+                if submit_button:
+                    try:
+                        # Make sure "User_Name" matches your Supabase table perfectly!
+                        response = supabase.table("User").select("*").eq("User_Name", username).eq("Password", password).execute()
+                        if len(response.data) > 0:
+                            st.session_state["password_correct"] = True
+                            st.rerun()
+                        else:
+                            st.error("🚨 Authentication failed. Invalid username or password.")
+                    except Exception as e:
+                        st.error(f"Database connection error: {e}")
+                        
+        with tab_register:
+            with st.form("register_form"):
+                new_username = st.text_input("Choose a Username")
+                new_password = st.text_input("Choose a Password", type="password")
+                register_button = st.form_submit_button("Register Account", use_container_width=True)
+                
+                if register_button:
+                    try:
+                        # 1. Check if username already exists
+                        check_user = supabase.table("User").select("*").eq("User_Name", new_username).execute()
+                        if len(check_user.data) > 0:
+                            st.error("⚠️ Username already exists. Please choose another one.")
+                        elif len(new_username) < 3 or len(new_password) < 5:
+                            st.warning("⚠️ Username must be 3+ chars and password 5+ chars.")
+                        else:
+                            # 2. Insert new user into the database
+                            supabase.table("User").insert({"User_Name": new_username, "Password": new_password}).execute()
+                            st.success("✅ Account created successfully! You can now log in.")
+                    except Exception as e:
+                        st.error(f"Error creating account: {e}")
+
     return False
 
 if not check_password():
@@ -162,7 +189,7 @@ if app_mode == "👤 Single Patient XAI":
                         "plt": plt_count, "mcv": mcv, "mch": mch, "mchc": mchc,
                         "ai_diagnosis": final_diagnosis
                     }
-                    supabase.table("patient_records").insert(db_record).execute()
+                    supabase.table("Patient_Records").insert(db_record).execute()
                     st.toast("✅ Anonymized record securely saved to Vertec Labs Cloud.")
                 except Exception as e:
                     st.warning(f"⚠️ Diagnosis complete, but failed to save to cloud: {e}")
@@ -352,10 +379,47 @@ elif app_mode == "📁 Batch Processing (CSV)":
                     type='primary'
                 )
 
+            # ==========================================
+            # BULK CLOUD SAVE 
+            # ==========================================
+            st.markdown("---")
+            st.markdown("### 💾 Cloud Database Sync")
+            batch_consent = st.checkbox("I confirm these records are anonymized and consent to storing them for AI research.", key="batch_consent")
+            
+            if st.button("☁️ Save Batch to Vertec Labs Cloud", type="primary"):
+                if batch_consent:
+                    with st.spinner("Uploading batch to database..."):
+                        try:
+                            # Package all rows into a single list
+                            records_to_insert = []
+                            for i in range(len(process_df)):
+                                records_to_insert.append({
+                                    "age": float(process_df['Age'].iloc[i]), 
+                                    "gender": str(process_df['Gender'].iloc[i]) if 'Gender' in process_df.columns else "Unknown", 
+                                    "wbc": float(process_df['WBC'].iloc[i]), 
+                                    "rbc": float(process_df['RBC'].iloc[i]), 
+                                    "hgb": float(process_df['Hemoglobin'].iloc[i]), 
+                                    "hct": float(process_df['Hematocrit'].iloc[i]), 
+                                    "plt": float(process_df['Platelets'].iloc[i]), 
+                                    "mcv": float(process_df['MCV'].iloc[i]), 
+                                    "mch": float(process_df['MCH'].iloc[i]), 
+                                    "mchc": float(process_df['MCHC'].iloc[i]),
+                                    "ai_diagnosis": str(batch_df['AI Final Diagnosis'].iloc[i])
+                                })
+                            
+                            # Notice I capitalized "Patient_Records" here to match your other code perfectly!
+                            supabase.table("Patient_Records").insert(records_to_insert).execute()
+                            st.success(f"✅ Successfully synced {len(records_to_insert)} anonymized patient records to the cloud database!")
+                        except Exception as e:
+                            st.error(f"⚠️ Failed to save batch to cloud: {e}")
+                else:
+                    st.warning("⚠️ Please check the consent box to synchronize data.")
+
+            # ==========================================
+            # DEEP DIVE INSPECTOR
+            # ==========================================
             st.markdown("---")
             st.markdown("### 🔍 Deep Dive: Patient Inspector")
-            st.markdown("Select a specific patient from the batch above to view their Explainable AI breakdown and Clinical Report.")
-            
             selected_row = st.selectbox(
                 "Select Patient Record:",
                 options=range(len(batch_df)),
